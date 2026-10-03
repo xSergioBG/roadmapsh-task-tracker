@@ -1,56 +1,65 @@
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
-const tasksFilePath = path.join(__dirname, "tasks.json");
+const tasksFilePath = process.env.TASKS_FILE || path.join(__dirname, "tasks.json");
+const statuses = new Set(["todo", "in-progress", "done"]);
 
 function readTasks() {
-  try {
-    const data = fs.readFileSync(tasksFilePath, "utf-8");
-    return JSON.parse(data);
-  } catch (error) {
-    // Si el archivo no existe o está vacío, retornamos un array vacío
-    return [];
+  let data;
+  try { data = fs.readFileSync(tasksFilePath, "utf8"); }
+  catch (error) { if (error.code === "ENOENT") return []; throw error; }
+  const tasks = data.trim() ? JSON.parse(data) : [];
+  if (!Array.isArray(tasks) || tasks.some(t => !t || !Number.isSafeInteger(t.id) ||
+      t.id < 1 || typeof t.description !== "string" || !statuses.has(t.status)) ||
+      new Set(tasks.map(t => t.id)).size !== tasks.length) {
+    throw new Error("Invalid tasks file; recover it before making changes.");
   }
+  return tasks;
 }
 
 function writeTasks(tasks) {
+  const temporary = tasksFilePath + "." + process.pid + ".tmp";
   try {
-    fs.writeFileSync(tasksFilePath, JSON.stringify(tasks, null, 2));
-  } catch (error) {
-    console.error("Error writing tasks to file:", error.message);
+    fs.writeFileSync(temporary, JSON.stringify(tasks, null, 2));
+    fs.renameSync(temporary, tasksFilePath);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
   }
 }
 
-function addTask(description) {
-  if (!description.trim()) {
-    console.log("Task description cannot be empty.");
-    return;
+function requireDescription(description) {
+  if (typeof description !== "string" || !description.trim()) {
+    throw new Error("Task description cannot be empty.");
   }
+  return description.trim();
+}
+
+function requireId(id) {
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error("ID must be a positive integer.");
+}
+
+function findTask(tasks, id) {
+  requireId(id);
+  const task = tasks.find(t => t.id === id);
+  if (!task) throw new Error(`Task with ID ${id} not found.`);
+  return task;
+}
+
+function addTask(description) {
+  description = requireDescription(description);
   const tasks = readTasks();
-  const id = tasks.length ? tasks[tasks.length - 1].id + 1 : 1;
-  const newTask = {
-    id,
-    description,
-    status: "todo",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  tasks.push(newTask);
+  const id = tasks.reduce((maximum, task) => Math.max(maximum, task.id), 0) + 1;
+  requireId(id);
+  const now = new Date().toISOString();
+  tasks.push({ id, description, status: "todo", createdAt: now, updatedAt: now });
   writeTasks(tasks);
   console.log(`Task added successfully (ID: ${id})`);
 }
 
 function updateTask(id, description) {
-  if (!description.trim()) {
-    console.log("Task description cannot be empty.");
-    return;
-  }
+  description = requireDescription(description);
   const tasks = readTasks();
-  const task = tasks.find((t) => t.id === id);
-  if (!task) {
-    console.log(`Task with ID ${id} not found.`);
-    return;
-  }
+  const task = findTask(tasks, id);
   task.description = description;
   task.updatedAt = new Date().toISOString();
   writeTasks(tasks);
@@ -58,68 +67,30 @@ function updateTask(id, description) {
 }
 
 function deleteTask(id) {
-  let tasks = readTasks();
-  const taskIndex = tasks.findIndex((t) => t.id === id);
-  if (taskIndex === -1) {
-    console.log(`Task with ID ${id} not found.`);
-    return;
-  }
-  tasks.splice(taskIndex, 1);
-  writeTasks(tasks);
+  const tasks = readTasks();
+  findTask(tasks, id);
+  writeTasks(tasks.filter(t => t.id !== id));
   console.log(`Task ${id} deleted successfully.`);
 }
 
-function markInProgress(id) {
+function mark(id, status) {
   const tasks = readTasks();
-  const task = tasks.find((t) => t.id === id);
-  if (!task) {
-    console.log(`Task with ID ${id} not found.`);
-    return;
-  }
-  task.status = "in-progress";
+  const task = findTask(tasks, id);
+  task.status = status;
   task.updatedAt = new Date().toISOString();
   writeTasks(tasks);
-  console.log(`Task ${id} marked as in-progress.`);
-}
-
-function markDone(id) {
-  const tasks = readTasks();
-  const task = tasks.find((t) => t.id === id);
-  if (!task) {
-    console.log(`Task with ID ${id} not found.`);
-    return;
-  }
-  task.status = "done";
-  task.updatedAt = new Date().toISOString();
-  writeTasks(tasks);
-  console.log(`Task ${id} marked as done.`);
+  console.log(`Task ${id} marked as ${status}.`);
 }
 
 function listTasks(statusFilter = null) {
-  const tasks = readTasks();
-  let filteredTasks = tasks;
-
-  if (statusFilter) {
-    filteredTasks = tasks.filter((t) => t.status === statusFilter);
-  }
-
-  if (filteredTasks.length === 0) {
-    console.log("No tasks found.");
-    return;
-  }
-
-  filteredTasks.forEach((task) => {
-    console.log(
-      `ID: ${task.id}, Description: ${task.description}, Status: ${task.status}, Created At: ${task.createdAt}, Updated At: ${task.updatedAt}`
-    );
-  });
+  if (statusFilter && !statuses.has(statusFilter)) throw new Error("Invalid status filter.");
+  const tasks = readTasks().filter(t => !statusFilter || t.status === statusFilter);
+  if (!tasks.length) console.log("No tasks found.");
+  for (const task of tasks) console.log(`ID: ${task.id}, Description: ${task.description}, Status: ${task.status}, Created At: ${task.createdAt}, Updated At: ${task.updatedAt}`);
 }
 
 module.exports = {
-  addTask,
-  updateTask,
-  deleteTask,
-  markInProgress,
-  markDone,
-  listTasks,
+  addTask, updateTask, deleteTask, listTasks,
+  markInProgress: id => mark(id, "in-progress"),
+  markDone: id => mark(id, "done"),
 };
