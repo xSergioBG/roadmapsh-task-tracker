@@ -1,94 +1,32 @@
-const {
-  addTask,
-  updateTask,
-  deleteTask,
-  markInProgress,
-  markDone,
-  listTasks,
-} = require("./task");
-
-// Obtener los argumentos de la línea de comandos
-const args = process.argv.slice(2);
-const command = args[0];
-
-if (!command) {
-  console.log(
-    "Comando no proporcionado. Comandos disponibles: add, update, delete, mark-in-progress, mark-done, list"
-  );
-  process.exit(1);
+#!/usr/bin/env node
+const tasks = require("./task");
+const [command, ...args] = process.argv.slice(2);
+const usage = "Commands: add, update, delete, mark-in-progress, mark-done, list";
+function id(value) {
+  if (!/^[1-9]\d*$/.test(value || "") || !Number.isSafeInteger(Number(value))) {
+    throw new Error("ID must be a positive integer.");
+  }
+  return Number(value);
 }
-
-switch (command) {
-  case "add":
-    const description = args.slice(1).join(" ");
-    if (!description) {
-      console.log("Error: La descripción de la tarea es obligatoria.");
-      return;
+try {
+  switch (command) {
+    case "add": tasks.addTask(args.join(" ")); break;
+    case "update": tasks.updateTask(id(args[0]), args.slice(1).join(" ")); break;
+    case "delete":
+    case "mark-in-progress":
+    case "mark-done": {
+      if (args.length !== 1) throw new Error("Provide exactly one ID.");
+      const action = { delete: "deleteTask", "mark-in-progress": "markInProgress", "mark-done": "markDone" }[command];
+      tasks[action](id(args[0]));
+      break;
     }
-    addTask(description);
-    break;
-
-  case "update":
-    if (args.length < 3) {
-      console.log("Error: Se requiere ID y descripción.");
-      return;
-    }
-    const updateId = parseInt(args[1], 10);
-    if (isNaN(updateId)) {
-      console.log("Error: El ID debe ser un número válido.");
-      return;
-    }
-    const updateDescription = args.slice(2).join(" ");
-    updateTask(updateId, updateDescription);
-    break;
-
-  case "delete":
-    if (args.length < 2) {
-      console.log("Error: Se requiere el ID de la tarea.");
-      return;
-    }
-    const deleteId = parseInt(args[1], 10);
-    if (isNaN(deleteId)) {
-      console.log("Error: El ID debe ser un número válido.");
-      return;
-    }
-    deleteTask(deleteId);
-    break;
-
-  case "mark-in-progress":
-    if (args.length < 2) {
-      console.log("Error: Se requiere el ID de la tarea.");
-      return;
-    }
-    const inProgressId = parseInt(args[1], 10);
-    if (isNaN(inProgressId)) {
-      console.log("Error: El ID debe ser un número válido.");
-      return;
-    }
-    markInProgress(inProgressId);
-    break;
-
-  case "mark-done":
-    if (args.length < 2) {
-      console.log("Error: Se requiere el ID de la tarea.");
-      return;
-    }
-    const doneId = parseInt(args[1], 10);
-    if (isNaN(doneId)) {
-      console.log("Error: El ID debe ser un número válido.");
-      return;
-    }
-    markDone(doneId);
-    break;
-
-  case "list":
-    const statusFilter = args[1];
-    listTasks(statusFilter);
-    break;
-
-  default:
-    console.log(
-      "Comando inválido. Comandos disponibles: add, update, delete, mark-in-progress, mark-done, list"
-    );
-    break;
+    case "list":
+      if (args.length > 1) throw new Error("Provide at most one status filter.");
+      tasks.listTasks(args[0]); break;
+    case "--help": case "-h": console.log(usage); break;
+    default: throw new Error(usage);
+  }
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
 }
